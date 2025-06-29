@@ -766,7 +766,7 @@
 </head>
 <body>
   <div class="container">
-    <div class="theme-toggle" id="themeToggle">
+    <div class="theme-toggle" id="themeToggle" aria-label="Toggle theme" role="button" tabindex="0">
       <div class="theme-toggle-handle"></div>
     </div>
     
@@ -800,15 +800,15 @@
       <div class="card">
         <div class="card-header">
           <h2 class="card-title"><i class="fas fa-globe"></i> Website Source Viewer</h2>
-          <div class="tooltip">
+          <div class="tooltip" tabindex="0" aria-label="Info">
             <i class="fas fa-info-circle"></i>
             <span class="tooltiptext">Enter URL and fetch source code. Use bypass for restricted sites.</span>
           </div>
         </div>
         
         <div class="input-group">
-          <input id="urlInput" type="text" placeholder="Enter website URL (e.g. https://example.com)" />
-          <button class="btn btn-success" onclick="getSource()">
+          <input id="urlInput" type="text" placeholder="Enter website URL (e.g. https://example.com)" aria-label="Website URL" autofocus />
+          <button class="btn btn-success" onclick="getSource()" aria-label="Fetch Source">
             <i class="fas fa-download"></i> Fetch Source
           </button>
         </div>
@@ -870,16 +870,16 @@
       <div class="card">
         <div class="card-header">
           <h2 class="card-title"><i class="fas fa-tools"></i> Tools & Information</h2>
-          <div class="tooltip">
+          <div class="tooltip" tabindex="0" aria-label="Info">
             <i class="fas fa-info-circle"></i>
             <span class="tooltiptext">View proxy status, history, and app information</span>
           </div>
         </div>
         
         <div class="tabs">
-          <div class="tab active" onclick="switchTab('proxies')">Proxy Status</div>
-          <div class="tab" onclick="switchTab('history')">Request History</div>
-          <div class="tab" onclick="switchTab('info')">Information</div>
+          <div class="tab active" onclick="switchTab('proxies')" tabindex="0" aria-label="Proxy Status">Proxy Status</div>
+          <div class="tab" onclick="switchTab('history')" tabindex="0" aria-label="Request History">Request History</div>
+          <div class="tab" onclick="switchTab('info')" tabindex="0" aria-label="Information">Information</div>
         </div>
         
         <div id="proxies" class="tab-content active">
@@ -912,6 +912,7 @@
             <li><span class="key-shortcut">Ctrl</span> + <span class="key-shortcut">D</span> - Download source</li>
             <li><span class="key-shortcut">Ctrl</span> + <span class="key-shortcut">F</span> - Format code</li>
             <li><span class="key-shortcut">Ctrl</span> + <span class="key-shortcut">M</span> - Minify code</li>
+            <li><span class="key-shortcut">Ctrl</span> + <span class="key-shortcut">E</span> - Extract data</li>
           </ul>
           
           <h4>New Features:</h4>
@@ -1210,38 +1211,41 @@
     async function getSource() {
       const urlInput = document.getElementById('urlInput');
       const url = urlInput.value.trim();
-      
+
       // Hide previous outputs
       outputElement.style.display = 'none';
       hideError();
       dataExtractionPanel.style.display = 'none';
-      
+
       // Validate URL
       if (!url) {
         showError('Please enter a valid URL.');
         return;
       }
-      
+
       if (!url.startsWith('http')) {
         showError('Please include http:// or https:// in the URL');
         return;
       }
-      
+
       // Add to history
       addToHistory(url);
-      
+
+      // Reset bypass attempts for new fetch
+      bypassAttempts = 0;
+
       // Show loading
       showLoading();
       updateStatus('Connecting to website...');
-      
+
       // Increment request count
       requestCount++;
       updateCounters();
-      
+
       try {
         // Attempt to fetch the URL directly first
         const response = await fetchWithHeaders(url);
-        
+
         if (!response.ok) {
           if (response.status === 403 || response.status === 429) {
             throw new Error(`Access denied (HTTP ${response.status}). The website may have protections in place.`);
@@ -1249,18 +1253,18 @@
             throw new Error(`HTTP error! Status: ${response.status}`);
           }
         }
-        
+
         // Get the response text
         const source = await response.text();
-        
+
         // Update the output
         outputElement.textContent = source;
         outputElement.style.display = 'block';
         currentSource = source;
-        
+
         // Highlight syntax
         hljs.highlightElement(outputElement);
-        
+
         // Update status
         updateStatus(`Successfully fetched source code from ${url}`);
         successCount++;
@@ -1317,101 +1321,746 @@
     // Try bypass methods
     async function tryBypassMethods() {
       const url = document.getElementById('urlInput').value.trim();
-      
+
       if (!url) {
         showError('Please enter a URL first');
         return;
       }
-      
+
       bypassAttempts++;
-      
+
       if (bypassAttempts > maxBypassAttempts) {
-        showError(`Maximum bypass attempts (${maxBypassAttempts}) reached. Website may have strong protections.`);
+        // Check if all proxies are inactive
+        const allInactive = proxies.every(p => p.status === 'inactive');
+        if (allInactive) {
+          showError('All proxies are currently inactive. Please try again later or check your network.');
+        } else {
+          showError(`Maximum bypass attempts (${maxBypassAttempts}) reached. Website may have strong protections.`);
+        }
         return;
       }
-      
+
       // Show loading
       showLoading();
       updateStatus(`Attempting bypass method ${bypassAttempts} of ${maxBypassAttempts}...`);
-      
+
       try {
         // Get the next proxy
-        const proxy = proxies[currentProxyIndex];
-        
-        // Attempt to fetch using proxy
-        const response = await fetchWithHeaders(url, proxy.url);
-        
-        if (!response.ok) {
-          throw new Error(`Proxy failed with status: ${response.status}`);
+        let attempts = 0;
+        let proxy, response, source;
+        let found = false;
+        while (attempts < proxies.length && !found) {
+          proxy = proxies[currentProxyIndex];
+          try {
+            response = await fetchWithHeaders(url, proxy.url);
+            if (response.ok) {
+              source = await response.text();
+              if (source) {
+                found = true;
+                break;
+              }
+            }
+            // Mark proxy as inactive if failed
+            proxy.status = 'inactive';
+            renderProxyStatus();
+          } catch (e) {
+            proxy.status = 'inactive';
+            renderProxyStatus();
+          }
+          // Rotate to next proxy
+          currentProxyIndex = (currentProxyIndex + 1) % proxies.length;
+          attempts++;
         }
-        
-        // Get the response text
-        const source = await response.text();
-        
-        if (!source) {
-          throw new Error('Proxy returned empty content');
+
+        if (!found) {
+          throw new Error('All proxies failed or returned empty content.');
         }
-        
+
         // Update the output
         outputElement.textContent = source;
         outputElement.style.display = 'block';
         currentSource = source;
-        
+
         // Highlight syntax
         hljs.highlightElement(outputElement);
-        
+
         // Update status
         updateStatus(`Success! Used proxy: ${proxy.name}`);
         bypassCount++;
         updateCounters();
-        
+
         // Mark proxy as active
         proxy.status = 'active';
         renderProxyStatus();
       } catch (error) {
-        // Mark proxy as inactive
-        proxies[currentProxyIndex].status = 'inactive';
-        renderProxyStatus();
+        handleFetchError(error, url);
+      } finally {
+        hideLoading();
+      }
+    }
+
+    // Check all proxies in parallel (debounced)
+    async function checkProxies() {
+      if (proxyCheckTimeout) {
+        clearTimeout(proxyCheckTimeout);
+      }
+      proxyCheckTimeout = setTimeout(async () => {
+        showLoading();
+        updateStatus('Checking proxy servers...');
+
+        const testUrl = 'https://example.com';
+
+        const proxyChecks = proxies.map(async (proxy, index) => {
+          try {
+            const response = await fetchWithHeaders(testUrl, proxy.url);
+            if (response.ok) {
+              proxy.status = 'active';
+            } else {
+              proxy.status = 'inactive';
+            }
+          } catch (error) {
+            proxy.status = 'inactive';
+          }
+          renderProxyStatus();
+        });
+
+        await Promise.all(proxyChecks);
+
+        updateStatus('Proxy check completed');
+        hideLoading();
+      }, 300);
+    }
+
+    // Copy source to clipboard
+    async function copySource() {
+      if (!currentSource) {
+        showError('No source code to copy');
+        return;
+      }
+      
+      try {
+        await navigator.clipboard.writeText(outputElement.textContent);
+        updateStatus('Source code copied to clipboard');
+      } catch (err) {
+        showError('Failed to copy: ' + err);
+      }
+    }
+    
+    // Download source code
+    function downloadSource() {
+      if (!currentSource) {
+        showError('No source code to download');
+        return;
+      }
+      
+      const blob = new Blob([outputElement.textContent], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'source_code.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      updateStatus('Source code downloaded');
+    }
+    
+    // Beautify code
+    function beautifyCode() {
+      if (!currentSource) {
+        showError('No source code to format');
+        return;
+      }
+      
+      try {
+        const formatted = html_beautify(currentSource, {
+          indent_size: 2,
+          indent_char: ' ',
+          max_preserve_newlines: 5,
+          preserve_newlines: true,
+          indent_scripts: 'normal'
+        });
         
-        // Rotate to next proxy
-        currentProxyIndex = (currentProxyIndex + 1) % proxies.length;
+        outputElement.textContent = formatted;
+        hljs.highlightElement(outputElement);
+        currentSource = formatted;
+        
+        updateStatus('Source code formatted');
+      } catch (e) {
+        showError('Error formatting code: ' + e.message);
+      }
+    }
+    
+    // Minify code
+    function minifyCode() {
+      if (!currentSource) {
+        showError('No source code to minify');
+        return;
+      }
+      
+      try {
+        // Simple minification (remove extra whitespace)
+        const minified = currentSource
+          .replace(/\s+/g, ' ')
+          .replace(/>\s+</g, '><')
+          .trim();
+        
+        outputElement.textContent = minified;
+        hljs.highlightElement(outputElement);
+        currentSource = minified;
+        
+        updateStatus('Source code minified');
+      } catch (e) {
+        showError('Error minifying code: ' + e.message);
+      }
+    }
+    
+    // Extract data from source
+    function extractData() {
+      if (!currentSource) {
+        showError('No source code to analyze');
+        return;
+      }
+      
+      dataExtractionPanel.style.display = 'block';
+      extractedList.innerHTML = '';
+      
+      // Extract links
+      const linkMatches = currentSource.match(/<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1/gi) || [];
+      const links = [...new Set(linkMatches.map(link => 
+        link.match(/href=(["'])(.*?)\1/i)[2]
+      ))].filter(link => link.startsWith('http'));
+      
+      // Extract images
+      const imgMatches = currentSource.match(/<img\s+(?:[^>]*?\s+)?src=(["'])(.*?)\1/gi) || [];
+      const images = [...new Set(imgMatches.map(img => 
+        img.match(/src=(["'])(.*?)\1/i)[2]
+      ))];
+      
+      // Extract scripts
+      const scriptMatches = currentSource.match(/<script\s+(?:[^>]*?\s+)?src=(["'])(.*?)\1/gi) || [];
+      const scripts = [...new Set(scriptMatches.map(script => 
+        script.match(/src=(["'])(.*?)\1/i)[2]
+      ))];
+      
+      // Display results
+      if (links.length > 0) {
+        const li = document.createElement('li');
+        li.innerHTML = `<strong>Links (${links.length}):</strong>`;
+        extractedList.appendChild(li);
+        
+        links.forEach(link => {
+          const li = document.createElement('li');
+          li.innerHTML = `<a href="${link}" target="_blank">${link}</a>`;
+          extractedList.appendChild(li);
+        });
+      }
+      
+      if (images.length > 0) {
+        const li = document.createElement('li');
+        li.innerHTML = `<strong>Images (${images.length}):</strong>`;
+        extractedList.appendChild(li);
+        
+        images.forEach(img => {
+          const li = document.createElement('li');
+          li.innerHTML = `<a href="${img}" target="_blank">${img}</a>`;
+          extractedList.appendChild(li);
+        });
+      }
+      
+      if (scripts.length > 0) {
+        const li = document.createElement('li');
+        li.innerHTML = `<strong>Scripts (${scripts.length}):</strong>`;
+        extractedList.appendChild(li);
+        
+        scripts.forEach(script => {
+          const li = document.createElement('li');
+          li.innerHTML = `<a href="${script}" target="_blank">${script}</a>`;
+          extractedList.appendChild(li);
+        });
+      }
+      
+      if (links.length === 0 && images.length === 0 && scripts.length === 0) {
+        extractedList.innerHTML = '<li>No links, images, or scripts found</li>';
+      }
+    }
+    
+    // Close data panel
+    function closeDataPanel() {
+      dataExtractionPanel.style.display = 'none';
+    }
+    
+    // Clear output
+    function clearOutput() {
+      outputElement.textContent = '';
+      outputElement.style.display = 'none';
+      hideError();
+      updateStatus('Output cleared');
+      bypassAttempts = 0;
+      currentSource = '';
+      dataExtractionPanel.style.display = 'none';
+    }
+    
+    // Autofocus and select input on focus for quick editing
+    document.addEventListener('DOMContentLoaded', function() {
+      const urlInput = document.getElementById('urlInput');
+      urlInput.focus();
+      urlInput.addEventListener('focus', function() {
+        urlInput.select();
+      });
+    });
+
+    // Debounce for proxy checks
+    let proxyCheckTimeout = null;
+
+    // Initialize the app
+    function init() {
+      renderProxyStatus();
+      loadHistory();
+      setupEventListeners();
+      loadThemePreference();
+      setTimeout(checkProxies, 2000);
+    }
+
+    // Set up event listeners
+    function setupEventListeners() {
+      document.getElementById('urlInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          getSource();
+        }
+      });
+      
+      document.addEventListener('keydown', function(e) {
+        if (e.ctrlKey) {
+          switch(e.key) {
+            case 'Enter':
+              getSource();
+              e.preventDefault();
+              break;
+            case 'b':
+              tryBypassMethods();
+              e.preventDefault();
+              break;
+            case 'c':
+              copySource();
+              e.preventDefault();
+              break;
+            case 'd':
+              downloadSource();
+              e.preventDefault();
+              break;
+            case 'f':
+              beautifyCode();
+              e.preventDefault();
+              break;
+            case 'm':
+              minifyCode();
+              e.preventDefault();
+              break;
+            case 'e':
+              extractData();
+              e.preventDefault();
+              break;
+          }
+        }
+      });
+      
+      // Theme toggle
+      themeToggle.addEventListener('click', toggleTheme);
+    }
+    
+    // Toggle light/dark theme
+    function toggleTheme() {
+      document.body.classList.toggle('light-mode');
+      // Save preference
+      localStorage.setItem('sourcepeekTheme', document.body.classList.contains('light-mode') ? 'light' : 'dark');
+      // Re-highlight code for theme change
+      if (currentSource) {
+        outputElement.textContent = currentSource;
+        hljs.highlightElement(outputElement);
+      }
+    }
+    
+    // Load theme preference
+    function loadThemePreference() {
+      const theme = localStorage.getItem('sourcepeekTheme');
+      if (theme === 'light') {
+        document.body.classList.add('light-mode');
+      }
+    }
+    
+    // Render proxy status
+    function renderProxyStatus() {
+      proxyStatusElement.innerHTML = '';
+      proxies.forEach((proxy, index) => {
+        const proxyElement = document.createElement('div');
+        proxyElement.className = `proxy-tag ${proxy.status}`;
+        proxyElement.innerHTML = `
+          <i class="fas fa-${proxy.status === 'active' ? 'check-circle' : proxy.status === 'inactive' ? 'times-circle' : 'question-circle'}"></i>
+          ${proxy.name}
+        `;
+        proxyStatusElement.appendChild(proxyElement);
+      });
+    }
+    
+    // Load request history
+    function loadHistory() {
+      const savedHistory = localStorage.getItem('sourcepeekHistory');
+      if (savedHistory) {
+        requestHistory = JSON.parse(savedHistory);
+        renderHistory();
+      }
+    }
+    
+    // Save request history
+    function saveHistory() {
+      localStorage.setItem('sourcepeekHistory', JSON.stringify(requestHistory));
+    }
+    
+    // Clear history
+    function clearHistory() {
+      requestHistory = [];
+      saveHistory();
+      renderHistory();
+      updateStatus('History cleared');
+    }
+    
+    // Render history
+    function renderHistory() {
+      historyPanel.innerHTML = '';
+      
+      if (requestHistory.length === 0) {
+        historyPanel.innerHTML = '<p class="text-muted" style="padding:10px">No request history yet</p>';
+        return;
+      }
+      
+      // Show only the last 10 items
+      const recentHistory = requestHistory.slice(-10).reverse();
+      
+      recentHistory.forEach(item => {
+        const historyItem = document.createElement('div');
+        historyItem.className = 'history-item';
+        historyItem.innerHTML = `
+          <div class="url">${truncate(item.url, 40)}</div>
+          <div class="time">${new Date(item.timestamp).toLocaleTimeString()}</div>
+        `;
+        
+        historyItem.addEventListener('click', () => {
+          document.getElementById('urlInput').value = item.url;
+          getSource();
+        });
+        
+        historyPanel.appendChild(historyItem);
+      });
+    }
+    
+    // Helper to truncate long URLs
+    function truncate(str, max) {
+      return str.length > max ? str.substring(0, max) + '...' : str;
+    }
+    
+    // Add to history
+    function addToHistory(url) {
+      // Check if URL already exists in history
+      if (!requestHistory.some(item => item.url === url)) {
+        requestHistory.push({
+          url: url,
+          timestamp: Date.now()
+        });
+        saveHistory();
+        renderHistory();
+      }
+    }
+    
+    // Update counters
+    function updateCounters() {
+      requestCountElement.textContent = requestCount;
+      successCountElement.textContent = successCount;
+      bypassCountElement.textContent = bypassCount;
+    }
+    
+    // Show status message
+    function updateStatus(message, isError = false) {
+      statusElement.textContent = message;
+      statusElement.style.display = 'block';
+      statusElement.style.borderLeftColor = isError ? 'var(--danger)' : 'var(--primary)';
+    }
+    
+    // Show error message
+    function showError(message) {
+      errorContainer.innerHTML = `
+        <div>${message}</div>
+        <button class="btn btn-sm btn-outline" style="margin-top:10px" onclick="retryFetch()">
+          <i class="fas fa-redo"></i> Retry
+        </button>
+      `;
+      errorContainer.style.display = 'block';
+    }
+    
+    // Hide error message
+    function hideError() {
+      errorContainer.style.display = 'none';
+    }
+    
+    // Show loading
+    function showLoading() {
+      loadingElement.style.display = 'flex';
+    }
+    
+    // Hide loading
+    function hideLoading() {
+      loadingElement.style.display = 'none';
+    }
+    
+    // Switch tabs
+    function switchTab(tabId) {
+      // Hide all tab contents
+      document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.remove('active');
+      });
+      
+      // Deactivate all tabs
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.remove('active');
+      });
+      
+      // Activate selected tab
+      document.getElementById(tabId).classList.add('active');
+      
+      // Activate tab button
+      document.querySelectorAll('.tab').forEach(tab => {
+        if (tab.textContent.toLowerCase().includes(tabId)) {
+          tab.classList.add('active');
+        }
+      });
+    }
+    
+    // Main function to get source code
+    async function getSource() {
+      const urlInput = document.getElementById('urlInput');
+      const url = urlInput.value.trim();
+
+      // Hide previous outputs
+      outputElement.style.display = 'none';
+      hideError();
+      dataExtractionPanel.style.display = 'none';
+
+      // Validate URL
+      if (!url) {
+        showError('Please enter a valid URL.');
+        return;
+      }
+
+      if (!url.startsWith('http')) {
+        showError('Please include http:// or https:// in the URL');
+        return;
+      }
+
+      // Add to history
+      addToHistory(url);
+
+      // Reset bypass attempts for new fetch
+      bypassAttempts = 0;
+
+      // Show loading
+      showLoading();
+      updateStatus('Connecting to website...');
+
+      // Increment request count
+      requestCount++;
+      updateCounters();
+
+      try {
+        // Attempt to fetch the URL directly first
+        const response = await fetchWithHeaders(url);
+
+        if (!response.ok) {
+          if (response.status === 403 || response.status === 429) {
+            throw new Error(`Access denied (HTTP ${response.status}). The website may have protections in place.`);
+          } else {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+          }
+        }
+
+        // Get the response text
+        const source = await response.text();
+
+        // Update the output
+        outputElement.textContent = source;
+        outputElement.style.display = 'block';
+        currentSource = source;
+
+        // Highlight syntax
+        hljs.highlightElement(outputElement);
+
+        // Update status
+        updateStatus(`Successfully fetched source code from ${url}`);
+        successCount++;
+        updateCounters();
+      } catch (error) {
         handleFetchError(error, url);
       } finally {
         hideLoading();
       }
     }
     
-    // Check all proxies in parallel
-    async function checkProxies() {
-      showLoading();
-      updateStatus('Checking proxy servers...');
+    // Fetch with headers
+    async function fetchWithHeaders(url, proxyUrl = null) {
+      const targetUrl = proxyUrl ? proxyUrl + encodeURIComponent(url) : url;
       
-      const testUrl = 'https://example.com';
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://www.google.com/',
+        'DNT': '1'
+      };
       
-      // Create an array of promises for each proxy check
-      const proxyChecks = proxies.map(async (proxy, index) => {
-        try {
-          const response = await fetchWithHeaders(testUrl, proxy.url);
-          if (response.ok) {
-            proxy.status = 'active';
-          } else {
-            proxy.status = 'inactive';
-          }
-        } catch (error) {
-          proxy.status = 'inactive';
-        }
-        
-        // Update UI after each check
-        renderProxyStatus();
+      return await fetch(targetUrl, {
+        headers: headers,
+        mode: 'cors'
       });
-      
-      // Wait for all checks to complete
-      await Promise.all(proxyChecks);
-      
-      updateStatus('Proxy check completed');
-      hideLoading();
     }
     
+    // Handle fetch errors
+    function handleFetchError(error, url) {
+      console.error('Fetch error:', error);
+      
+      let errorMessage = error.message;
+      
+      if (errorMessage.includes('Failed to fetch')) {
+        errorMessage = 'Network error: Could not connect to the website. Check your connection or try a proxy.';
+      } else if (errorMessage.includes('CORS')) {
+        errorMessage = 'CORS error: The website blocked this request due to cross-origin restrictions.';
+      }
+      
+      showError(errorMessage);
+      outputElement.textContent = `Error: ${errorMessage}\n\nURL: ${url}`;
+      outputElement.style.display = 'block';
+      currentSource = '';
+    }
+    
+    // Retry fetch
+    function retryFetch() {
+      hideError();
+      getSource();
+    }
+    
+    // Try bypass methods
+    async function tryBypassMethods() {
+      const url = document.getElementById('urlInput').value.trim();
+
+      if (!url) {
+        showError('Please enter a URL first');
+        return;
+      }
+
+      bypassAttempts++;
+
+      if (bypassAttempts > maxBypassAttempts) {
+        // Check if all proxies are inactive
+        const allInactive = proxies.every(p => p.status === 'inactive');
+        if (allInactive) {
+          showError('All proxies are currently inactive. Please try again later or check your network.');
+        } else {
+          showError(`Maximum bypass attempts (${maxBypassAttempts}) reached. Website may have strong protections.`);
+        }
+        return;
+      }
+
+      // Show loading
+      showLoading();
+      updateStatus(`Attempting bypass method ${bypassAttempts} of ${maxBypassAttempts}...`);
+
+      try {
+        // Get the next proxy
+        let attempts = 0;
+        let proxy, response, source;
+        let found = false;
+        while (attempts < proxies.length && !found) {
+          proxy = proxies[currentProxyIndex];
+          try {
+            response = await fetchWithHeaders(url, proxy.url);
+            if (response.ok) {
+              source = await response.text();
+              if (source) {
+                found = true;
+                break;
+              }
+            }
+            // Mark proxy as inactive if failed
+            proxy.status = 'inactive';
+            renderProxyStatus();
+          } catch (e) {
+            proxy.status = 'inactive';
+            renderProxyStatus();
+          }
+          // Rotate to next proxy
+          currentProxyIndex = (currentProxyIndex + 1) % proxies.length;
+          attempts++;
+        }
+
+        if (!found) {
+          throw new Error('All proxies failed or returned empty content.');
+        }
+
+        // Update the output
+        outputElement.textContent = source;
+        outputElement.style.display = 'block';
+        currentSource = source;
+
+        // Highlight syntax
+        hljs.highlightElement(outputElement);
+
+        // Update status
+        updateStatus(`Success! Used proxy: ${proxy.name}`);
+        bypassCount++;
+        updateCounters();
+
+        // Mark proxy as active
+        proxy.status = 'active';
+        renderProxyStatus();
+      } catch (error) {
+        handleFetchError(error, url);
+      } finally {
+        hideLoading();
+      }
+    }
+
+    // Check all proxies in parallel (debounced)
+    async function checkProxies() {
+      if (proxyCheckTimeout) {
+        clearTimeout(proxyCheckTimeout);
+      }
+      proxyCheckTimeout = setTimeout(async () => {
+        showLoading();
+        updateStatus('Checking proxy servers...');
+
+        const testUrl = 'https://example.com';
+
+        const proxyChecks = proxies.map(async (proxy, index) => {
+          try {
+            const response = await fetchWithHeaders(testUrl, proxy.url);
+            if (response.ok) {
+              proxy.status = 'active';
+            } else {
+              proxy.status = 'inactive';
+            }
+          } catch (error) {
+            proxy.status = 'inactive';
+          }
+          renderProxyStatus();
+        });
+
+        await Promise.all(proxyChecks);
+
+        updateStatus('Proxy check completed');
+        hideLoading();
+      }, 300);
+    }
+
     // Copy source to clipboard
     async function copySource() {
       if (!currentSource) {
