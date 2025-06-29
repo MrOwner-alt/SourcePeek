@@ -3,11 +3,6 @@
 **Advanced Web Scraper & Source Viewer**  
 A powerful developer tool to inspect website source code, bypass restrictions, and extract data using proxy rotation. Built with vanilla HTML, CSS, and JavaScript.
 
----
-
-![SourcePeek+ Pro Demo](https://via.placeholder.com/800x500/0d1117/58a6ff?text=SourcePeek+Pro+Demo)
-
----
 
 ## Features
 
