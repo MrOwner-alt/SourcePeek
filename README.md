@@ -66,5 +66,4 @@ A powerful developer tool to inspect website source code, bypass restrictions, a
 
 ```bash
 git clone https://github.com/MrOwner-alt/SourcePeek
-cd sourcepeek-pro
-open index.html
+open SourcePeek.html
