@@ -31,13 +31,6 @@ A powerful developer tool to inspect website source code, bypass restrictions, a
   - HTTP status feedback  
   - Rate limit handling  
 
----
-
-## Live Demo
-
-🚀 [GitHub Pages Link] (Add link here if deployed)
-
----
 
 ## Usage
 
